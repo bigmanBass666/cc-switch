@@ -54,46 +54,21 @@ jobs:
 
       - name: Prepare Windows Assets
         shell: pwsh
-        env:
-          WINDOWS_RELEASE_ARCH: 'x86_64'
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
-          $targetRoot = 'src-tauri/target/release'
-          $assetSuffix = ''
 
-          # MSI installer
-          $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/msi') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $msi) {
-            $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+            $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           }
           if ($msi) {
             $dest = "CC-Switch-${VERSION}-Windows.msi"
             Copy-Item $msi.FullName (Join-Path release-assets $dest)
-            Write-Host "Installer copied: $dest"
-            $sigPath = "$($msi.FullName).sig"
-            if (Test-Path $sigPath) {
-              Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
-              Write-Host "Signature copied: $dest.sig"
-            }
-          }
-
-          # Portable zip
-          $exePath = 'src-tauri/target/release/cc-switch.exe'
-          if (Test-Path $exePath) {
-            $portableDir = 'release-assets/CC-Switch-Portable'
-            New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
-            Copy-Item $exePath $portableDir
-            $portableIniPath = Join-Path $portableDir 'portable.ini'
-            @(
-              '# CC Switch portable build marker',
-              'portable=true'
-            ) | Set-Content -Path $portableIniPath -Encoding UTF8
-            $portableZip = "release-assets/CC-Switch-${VERSION}-Windows-Portable.zip"
-            Compress-Archive -Path "$portableDir/*" -DestinationPath $portableZip -Force
-            Remove-Item -Recurse -Force $portableDir
-            Write-Host "Portable zip created: CC-Switch-${VERSION}-Windows-Portable.zip"
+            Write-Host "MSI ready: $dest"
+          } else {
+            Write-Error "No MSI installer found"
           }
 
       - name: Upload artifacts
