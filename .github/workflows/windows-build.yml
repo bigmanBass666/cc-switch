@@ -1,0 +1,104 @@
+name: Windows Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Windows x86_64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          corepack install
+          node --version
+          pnpm --version
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri App (Windows)
+        run: pnpm tauri build
+
+      - name: Prepare Windows Assets
+        shell: pwsh
+        env:
+          WINDOWS_RELEASE_ARCH: 'x86_64'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          $targetRoot = 'src-tauri/target/release'
+          $assetSuffix = ''
+
+          # MSI installer
+          $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/msi') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $msi) {
+            $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($msi) {
+            $dest = "CC-Switch-${VERSION}-Windows.msi"
+            Copy-Item $msi.FullName (Join-Path release-assets $dest)
+            Write-Host "Installer copied: $dest"
+            $sigPath = "$($msi.FullName).sig"
+            if (Test-Path $sigPath) {
+              Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
+              Write-Host "Signature copied: $dest.sig"
+            }
+          }
+
+          # Portable zip
+          $exePath = 'src-tauri/target/release/cc-switch.exe'
+          if (Test-Path $exePath) {
+            $portableDir = 'release-assets/CC-Switch-Portable'
+            New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+            Copy-Item $exePath $portableDir
+            $portableIniPath = Join-Path $portableDir 'portable.ini'
+            @(
+              '# CC Switch portable build marker',
+              'portable=true'
+            ) | Set-Content -Path $portableIniPath -Encoding UTF8
+            $portableZip = "release-assets/CC-Switch-${VERSION}-Windows-Portable.zip"
+            Compress-Archive -Path "$portableDir/*" -DestinationPath $portableZip -Force
+            Remove-Item -Recurse -Force $portableDir
+            Write-Host "Portable zip created: CC-Switch-${VERSION}-Windows-Portable.zip"
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-${{ github.ref_name }}
+          path: release-assets/*
+          if-no-files-found: error
