@@ -56,14 +56,22 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          $VERSION = if ($env:GITHUB_REF_NAME -match '^v') {
+              $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+              'manual'
+          }
 
           $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $msi) {
             $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           }
           if ($msi) {
-            $dest = "CC-Switch-${VERSION}-Windows.msi"
+            $dest = if ($VERSION -ne 'manual') {
+                "CC-Switch-${VERSION}-Windows.msi"
+            } else {
+                "CC-Switch-Windows.msi"
+            }
             Copy-Item $msi.FullName (Join-Path release-assets $dest)
             Write-Host "MSI ready: $dest"
           } else {
